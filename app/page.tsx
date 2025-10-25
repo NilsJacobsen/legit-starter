@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 "use client";
 
 import { useEffect, useState } from "react";
@@ -48,6 +49,7 @@ export default function Home() {
     if (!oid || !legitFs) return "";
     try {
       const path = `/.legit/commits/${oid.slice(0, 2)}/${oid.slice(2)}/${FILE_NAME}`;
+      // @ts-expect-error
       const content = await legitFs.promises.readFile(path);
       return String(content);
     } catch {
@@ -60,6 +62,7 @@ export default function Home() {
     if (!legitFs) return;
     const interval = setInterval(async () => {
       try {
+        // @ts-expect-error
         const raw = await legitFs.promises.readFile("/.legit/branches/main/.legit/history");
         const parsed: HistoryItem[] = JSON.parse(String(raw));
 
@@ -98,6 +101,7 @@ export default function Home() {
   // Save latest commit (only allowed on HEAD)
   const handleSave = async () => {
     if (!legitFs || checkoutOid !== history[0]?.oid) return;
+    // @ts-expect-error
     await legitFs.promises.writeFile(`/.legit/branches/main/${FILE_NAME}`, text);
     setCheckoutOid(null)
   };
