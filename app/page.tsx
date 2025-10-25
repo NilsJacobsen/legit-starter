@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 "use client";
 
 import { useEffect, useState } from "react";
@@ -25,16 +24,28 @@ type HistoryItem = {
 export default function Home() {
   const [legitFs, setLegitFs] = useState<ReturnType<typeof createLegitFs> | null>(null);
   const [text, setText] = useState("Hello World");
+  const [currentText, setCurrentText] = useState("Hello World");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [checkoutOid, setCheckoutOid] = useState<string | null>(null);
-  const [currentText, setCurrentText] = useState<string>(text);
 
+    // Get commit content by OID
+  const getCommitContent = async (oid: string | null) => {
+    if (!oid || !legitFs) return "";
+    const path = `/.legit/commits/${oid.slice(0, 2)}/${oid.slice(2)}/document.txt`;
+    try {
+      const content = await legitFs.promises.readFile(path);
+      return String(content);
+    } catch {
+      return "";
+    }
+  };
+
+  // Initialize in-memory repo
   useEffect(() => {
     const initFs = async () => {
       const vol = new Volume();
       const fs = createFsFromVolume(vol);
 
-      // Initialize Git repo
       await git.init({ fs, dir: "/", defaultBranch: "main" });
       await fs.promises.writeFile("/document.txt", "Hello World");
       await git.add({ fs, dir: "/", filepath: "document.txt" });
@@ -45,87 +56,56 @@ export default function Home() {
         author: { name: "Test", email: "test@example.com" },
       });
 
-      const versionedFs = createLegitFs(fs, "/");
-      setLegitFs(versionedFs);
+      setLegitFs(createLegitFs(fs, "/"));
     };
-
     initFs();
   }, []);
 
-  // Polling history every second
+  // Poll history every second
   useEffect(() => {
     if (!legitFs) return;
-
     const interval = setInterval(async () => {
       try {
-        // @ts-expect-error
-        const h = await legitFs.promises.readFile("/.legit/branches/main/.legit/history");
-        const parsed = JSON.parse(String(h));
+        const raw = await legitFs.promises.readFile("/.legit/branches/main/.legit/history");
+        const parsed: HistoryItem[] = JSON.parse(String(raw));
         setHistory(parsed);
 
-        // Show latest commit if nothing checked out
         if (!checkoutOid && parsed.length > 0) {
           setCheckoutOid(parsed[0].oid);
-          // Load latest content
-          // @ts-expect-error
-          const latest = await legitFs.promises.readFile("/.legit/branches/main/document.txt");
-          setCurrentText(String(latest));
+          const content = await getCommitContent(parsed[0].oid);
+          setCurrentText(content);
+          setText(content);
         }
       } catch {
         setHistory([]);
       }
     }, 1000);
-
     return () => clearInterval(interval);
   }, [legitFs, checkoutOid]);
 
-  const handleSave = async () => {
-    if (!legitFs || checkoutOid !== history[0].oid) return;
-
-    try {
-      // Only allow edits on latest commit
-      // @ts-expect-error
-      await legitFs.promises.writeFile("/.legit/branches/main/document.txt", text);
-      setCurrentText(text);
-      setCheckoutOid(null);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const getCommitState = async (id: string | null) => {
-    const path = id
-      ? `/.legit/commits/${id.slice(0,2)}/${id.slice(2)}/document.txt`
-      : undefined;
-
-    let content = ""
-    if(path) {
-      // @ts-expect-error
-      content = String(await legitFs?.promises.readFile(path));
-      return content
-    }
-    return ''
-  }
-
+  // Checkout a commit
   const checkoutCommit = async (oid: string) => {
     if (!legitFs) return;
 
     setCheckoutOid(oid);
-
-    // Load content from selected commit
     const commit = history.find((h) => h.oid === oid);
     if (!commit) return;
 
     const parentOid = commit.parent[0] || null;
-    const oldContent = await getCommitState(parentOid)
-    const newContent = await getCommitState(oid)
+    const oldContent = await getCommitContent(parentOid);
+    const newContent = await getCommitContent(oid);
 
     setCurrentText(newContent);
 
-    // If latest commit, allow editing
-    if (oid === history[0].oid) {
-      setText(newContent);
-    }
+    // Allow editing only on latest commit
+    if (oid === history[0]?.oid) setText(newContent);
+  };
+
+  const handleSave = async () => {
+    if (!legitFs || checkoutOid !== history[0]?.oid) return;
+    await legitFs.promises.writeFile("/.legit/branches/main/document.txt", text);
+    setCurrentText(text);
+    setCheckoutOid(null);
   };
 
   return (
