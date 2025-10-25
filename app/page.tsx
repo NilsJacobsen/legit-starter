@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import { Volume, createFsFromVolume } from "memfs";
 import * as git from "isomorphic-git";
 import { createLegitFs } from "../legit-sdk";
+import { DiffMatchPatch } from "diff-match-patch-ts"
 
 type User = { name: string; email: string; timestamp: number };
 type HistoryItem = { oid: string; message: string; parent: string[]; author: User; };
 
 export default function Home() {
+  const dmp = new DiffMatchPatch();
   const [legitFs, setLegitFs] = useState<ReturnType<typeof createLegitFs> | null>(null);
   const [text, setText] = useState("Hello World");
   const [currentText, setCurrentText] = useState("Hello World");
@@ -114,20 +116,25 @@ export default function Home() {
 
       <h2 className="mt-4 text-lg font-semibold text-black dark:text-zinc-50">History</h2>
       <div className="flex flex-col gap-2 max-w-xl w-full">
-        {history.map((h) => (
-          <div key={h.oid} className="border rounded p-2">
+        {history.map((h) => {
+          const diffs = dmp.diff_main(h.oldContent, h.newContent);
+          dmp.diff_cleanupSemantic(diffs);
+          const html = dmp.diff_prettyHtml(diffs);
+
+          return <div key={h.oid} className="border rounded p-2">
             <button
               onClick={() => checkoutCommit(h.oid)}
               className={`text-left w-full px-2 py-1 ${checkoutOid === h.oid ? "bg-gray-300 dark:bg-zinc-700" : ""}`}
             >
               {h.message} - {new Date(h.author.timestamp).toLocaleString()}
             </button>
-            <pre className="text-sm text-gray-600 dark:text-gray-400">
-              <strong>Old:</strong> {h.oldContent.substring(0, 30)}{" "}
-              <strong>→</strong> {h.newContent.substring(0, 30)}
-            </pre>
+
+            <div
+              className="text-sm text-gray-700 dark:text-gray-300 overflow-auto whitespace-pre-wrap"
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
           </div>
-        ))}
+        })}
       </div>
     </div>
   );
