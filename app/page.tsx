@@ -5,40 +5,15 @@ import { Volume, createFsFromVolume } from "memfs";
 import * as git from "isomorphic-git";
 import { createLegitFs } from "../legit-sdk";
 
-type User = {
-  name: string;
-  email: string;
-  timestamp: number;
-  timezoneOffset: number;
-};
-
-type HistoryItem = {
-  oid: string;
-  message: string;
-  parent: string[];
-  tree: string;
-  author: User;
-  committer: User;
-};
+type User = { name: string; email: string; timestamp: number };
+type HistoryItem = { oid: string; message: string; parent: string[]; author: User; };
 
 export default function Home() {
   const [legitFs, setLegitFs] = useState<ReturnType<typeof createLegitFs> | null>(null);
   const [text, setText] = useState("Hello World");
   const [currentText, setCurrentText] = useState("Hello World");
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [history, setHistory] = useState<(HistoryItem & { oldContent: string; newContent: string })[]>([]);
   const [checkoutOid, setCheckoutOid] = useState<string | null>(null);
-
-    // Get commit content by OID
-  const getCommitContent = async (oid: string | null) => {
-    if (!oid || !legitFs) return "";
-    const path = `/.legit/commits/${oid.slice(0, 2)}/${oid.slice(2)}/document.txt`;
-    try {
-      const content = await legitFs.promises.readFile(path);
-      return String(content);
-    } catch {
-      return "";
-    }
-  };
 
   // Initialize in-memory repo
   useEffect(() => {
@@ -49,58 +24,66 @@ export default function Home() {
       await git.init({ fs, dir: "/", defaultBranch: "main" });
       await fs.promises.writeFile("/document.txt", "Hello World");
       await git.add({ fs, dir: "/", filepath: "document.txt" });
-      await git.commit({
-        fs,
-        dir: "/",
-        message: "Initial commit",
-        author: { name: "Test", email: "test@example.com" },
-      });
+      await git.commit({ fs, dir: "/", message: "Initial commit", author: { name: "Test", email: "test@example.com", timestamp: Date.now() } });
 
       setLegitFs(createLegitFs(fs, "/"));
     };
     initFs();
   }, []);
 
-  // Poll history every second
+  // Get file content from a commit
+  const getCommitContent = async (oid: string | null) => {
+    if (!oid || !legitFs) return "";
+    try {
+      const path = `/.legit/commits/${oid.slice(0, 2)}/${oid.slice(2)}/document.txt`;
+      const content = await legitFs.promises.readFile(path);
+      return String(content);
+    } catch {
+      return "";
+    }
+  };
+
+  // Poll history
   useEffect(() => {
     if (!legitFs) return;
     const interval = setInterval(async () => {
       try {
         const raw = await legitFs.promises.readFile("/.legit/branches/main/.legit/history");
         const parsed: HistoryItem[] = JSON.parse(String(raw));
-        setHistory(parsed);
 
-        if (!checkoutOid && parsed.length > 0) {
-          setCheckoutOid(parsed[0].oid);
-          const content = await getCommitContent(parsed[0].oid);
-          setCurrentText(content);
-          setText(content);
+        // Compute old/new preview for each commit
+        const enriched = await Promise.all(parsed.map(async (h) => {
+          const newContent = await getCommitContent(h.oid);
+          const parentOid = h.parent[0] || null;
+          const oldContent = await getCommitContent(parentOid);
+          return { ...h, oldContent, newContent };
+        }));
+
+        setHistory(enriched);
+
+        if (!checkoutOid && enriched.length > 0) {
+          setCheckoutOid(enriched[0].oid);
+          setCurrentText(enriched[0].newContent);
+          setText(enriched[0].newContent);
         }
       } catch {
         setHistory([]);
       }
     }, 1000);
+
     return () => clearInterval(interval);
   }, [legitFs, checkoutOid]);
 
-  // Checkout a commit
-  const checkoutCommit = async (oid: string) => {
-    if (!legitFs) return;
-
-    setCheckoutOid(oid);
+  // Checkout commit
+  const checkoutCommit = (oid: string) => {
     const commit = history.find((h) => h.oid === oid);
     if (!commit) return;
-
-    const parentOid = commit.parent[0] || null;
-    const oldContent = await getCommitContent(parentOid);
-    const newContent = await getCommitContent(oid);
-
-    setCurrentText(newContent);
-
-    // Allow editing only on latest commit
-    if (oid === history[0]?.oid) setText(newContent);
+    setCheckoutOid(oid);
+    setCurrentText(commit.newContent);
+    if (oid === history[0]?.oid) setText(commit.newContent); // allow editing only on latest
   };
 
+  // Save latest commit
   const handleSave = async () => {
     if (!legitFs || checkoutOid !== history[0]?.oid) return;
     await legitFs.promises.writeFile("/.legit/branches/main/document.txt", text);
@@ -132,17 +115,21 @@ export default function Home() {
       <h2 className="mt-4 text-lg font-semibold text-black dark:text-zinc-50">History</h2>
       <div className="flex flex-col gap-2 max-w-xl w-full">
         {history.map((h) => (
-          <button
-            key={h.oid}
-            onClick={() => checkoutCommit(h.oid)}
-            className={`text-left px-2 py-1 border rounded ${
-              checkoutOid === h.oid ? "bg-gray-300 dark:bg-zinc-700" : ""
-            }`}
-          >
-            {h.message} - {new Date(h.author.timestamp * 1000).toLocaleString()}
-          </button>
+          <div key={h.oid} className="border rounded p-2">
+            <button
+              onClick={() => checkoutCommit(h.oid)}
+              className={`text-left w-full px-2 py-1 ${checkoutOid === h.oid ? "bg-gray-300 dark:bg-zinc-700" : ""}`}
+            >
+              {h.message} - {new Date(h.author.timestamp).toLocaleString()}
+            </button>
+            <pre className="text-sm text-gray-600 dark:text-gray-400">
+              <strong>Old:</strong> {h.oldContent.substring(0, 30)}{" "}
+              <strong>→</strong> {h.newContent.substring(0, 30)}
+            </pre>
+          </div>
         ))}
       </div>
     </div>
   );
 }
+
