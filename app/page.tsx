@@ -112,7 +112,7 @@ export default function Home() {
     dmp.diff_cleanupSemantic(diff);
     return (
       <div
-        className="prose text-sm text-gray-700 dark:text-gray-300"
+        className="prose text-sm text-gray-700"
         dangerouslySetInnerHTML={{ __html: dmp.diff_prettyHtml(diff) }}
       />
     );
