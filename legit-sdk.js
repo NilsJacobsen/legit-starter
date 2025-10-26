@@ -36822,7 +36822,7 @@ var _GitSubFs = class _GitSubFs extends BaseCompositeSubFs {
       readSha: void 0,
       unflushed: []
     };
-    if (flags.includes("x")) {
+    if (flags.includes("x") || flags.includes("w")) {
       this.openFh[fd].unflushed.push({
         length: 0,
         start: 0
