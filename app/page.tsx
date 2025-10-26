@@ -50,8 +50,7 @@ export default function Home() {
     try {
       const path = `/.legit/commits/${oid.slice(0, 2)}/${oid.slice(2)}/${FILE_NAME}`;
       // @ts-expect-error
-      const content = await legitFs.promises.readFile(path);
-      return String(content);
+      return await legitFs.promises.readFile(path, "utf8");
     } catch {
       return "";
     }
@@ -63,8 +62,8 @@ export default function Home() {
     const interval = setInterval(async () => {
       try {
         // @ts-expect-error
-        const raw = await legitFs.promises.readFile("/.legit/branches/main/.legit/history");
-        const parsed: HistoryItem[] = JSON.parse(String(raw));
+        const raw = await legitFs.promises.readFile("/.legit/branches/main/.legit/history", "utf8");
+        const parsed: HistoryItem[] = JSON.parse(raw);
 
         const enriched = await Promise.all(
           parsed.map(async (h) => {
