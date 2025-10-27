@@ -36,7 +36,7 @@ export default function Home() {
         fs,
         dir: "/",
         message: "Initial commit",
-        author: { name: "Test", email: "test@example.com", timestamp: Date.now() },
+        author: { name: "Test", email: "test@example.com" },
       });
 
       setLegitFs(createLegitFs(fs, "/"));
@@ -91,6 +91,7 @@ export default function Home() {
 
   // Checkout a commit
   const checkoutCommit = (oid: string) => {
+    // take from fs
     const commit = history.find((h) => h.oid === oid);
     if (!commit) return;
     setCheckoutOid(oid);
@@ -162,8 +163,7 @@ export default function Home() {
               <p className="text-md font-semibold flex-1" >
                 {h.message}
               </p>
-              {/* TODO: fix format */}
-              {format(String(h.author.timestamp).length < 13 ? h.author.timestamp * 1000 : h.author.timestamp)}
+              {format(h.author.timestamp * 1000)}
             </div>
             <div className="mt-2">{renderDiff(h.oldContent, h.newContent)}</div>
           </div>
