@@ -1,10 +1,8 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Volume, createFsFromVolume } from "memfs";
-import * as git from "isomorphic-git";
-import { createLegitFs } from "../legit-sdk";
+import fs from "memfs";
+import { initLegitFs } from "../legit-sdk";
 import { DiffMatchPatch } from "diff-match-patch-ts";
 import Image from "next/image";
 import { format } from "timeago.js";
@@ -18,29 +16,21 @@ type HistoryItem = { oid: string; message: string; parent: string[]; author: Use
 
 export default function Home() {
   const dmp = new DiffMatchPatch();
-  const [legitFs, setLegitFs] = useState<ReturnType<typeof createLegitFs> | null>(null);
+  const [legitFs, setLegitFs] = useState<Awaited<ReturnType<typeof initLegitFs>> | null>(null);
   const [text, setText] = useState(INITIAL_TEXT);
   const [history, setHistory] = useState<(HistoryItem & { oldContent: string; newContent: string })[]>([]);
   const [checkoutOid, setCheckoutOid] = useState<string | null>(null);
   const headRef = useRef<string | null>(null);
 
-  // Initialize in-memory repo
+  // Initialize in-memory repo & and put a document.txt in it
   useEffect(() => {
     const initFs = async () => {
-      const vol = new Volume();
-      const fs = createFsFromVolume(vol);
-
-      await git.init({ fs, dir: "/", defaultBranch: "main" });
-      await fs.promises.writeFile("/" + FILE_NAME, INITIAL_TEXT);
-      await git.add({ fs, dir: "/", filepath: FILE_NAME });
-      await git.commit({
-        fs,
-        dir: "/",
-        message: "Initial commit",
-        author: { name: "Test", email: "test@example.com" },
-      });
-
-      setLegitFs(createLegitFs(fs, "/"));
+      // make sure it only runs once
+      if(legitFs) return 
+      const _legitFs = await initLegitFs(fs, "/");
+      // setup first file
+      await _legitFs.promises.writeFile(`/.legit/branches/main/${FILE_NAME}`, INITIAL_TEXT);
+      setLegitFs(_legitFs);
     };
     initFs();
   }, []);
@@ -48,9 +38,11 @@ export default function Home() {
   // Get file content from a commit
   const getCommitContent = async (oid: string | null) => {
     if (!oid || !legitFs) return "";
-    const path = `/.legit/commits/${oid.slice(0, 2)}/${oid.slice(2)}/${FILE_NAME}`;
-    //@ts-expect-error
-    return await legitFs.promises.readFile(path, "utf8");
+    try {
+      return await legitFs.promises.readFile(`/.legit/commits/${oid.slice(0, 2)}/${oid.slice(2)}/${FILE_NAME}`, "utf8") as string;
+    } catch {
+      return ""
+    }
   };
 
   // Poll for head changes and update history only when it changes
@@ -58,16 +50,13 @@ export default function Home() {
     if (!legitFs) return;
 
     const poll = setInterval(async () => {
-      //@ts-expect-error
-      const newHead = await legitFs.promises.readFile("/.legit/branches/main/.legit/head", "utf8");
+      const newHead = await legitFs.promises.readFile("/.legit/branches/main/.legit/head", "utf8") as string;
 
       if (newHead && newHead !== headRef.current) {
-        console.log("load", newHead)
         headRef.current = newHead;
 
         // refresh history only when HEAD changes
-        //@ts-expect-error
-        const raw = await legitFs.promises.readFile("/.legit/branches/main/.legit/history", "utf8");
+        const raw = await legitFs.promises.readFile("/.legit/branches/main/.legit/history", "utf8") as string;
         if (!raw) return;
 
         const parsed: HistoryItem[] = JSON.parse(raw);
@@ -96,24 +85,21 @@ export default function Home() {
 
   // Checkout a commit
   const checkoutCommit = async (oid: string) => {
+    setText(await getCommitContent(oid));
     setCheckoutOid(oid);
-    const commit = history.find((h) => h.oid === oid);
-    if (commit) setText(commit.newContent);
   };
 
   // Save latest commit (only allowed on HEAD)
   const handleSave = async () => {
     if (!legitFs || checkoutOid !== history[0]?.oid) return;
-    // @ts-expect-error
     await legitFs.promises.writeFile(`/.legit/branches/main/${FILE_NAME}`, text);
 
     // Get the new HEAD OID after the commit happens
-    // @ts-expect-error
     const newHead = await legitFs.promises.readFile(
       "/.legit/branches/main/.legit/head",
       "utf8"
-    );
-    setCheckoutOid(newHead.trim());
+    ) as string;
+    setCheckoutOid(newHead);
   };
 
   // Render diff helper

@@ -33335,18 +33335,10 @@ var _CompositFsFileHandle = class _CompositFsFileHandle {
     // }
     // the filedescriptor from the sub fs
     __publicField(this, "_subFsFileDescriptor");
-    /**
-     * a file in a subsystem might be represented by multiple files within the parent fs
-     * this array contains the filedescriptor pointing to the open files in the parent fs
-     *
-     * NOTE in case of virtual files - the parentfs might not have any file representing the file
-     */
-    __publicField(this, "_parentFsFileDescriptors");
     __publicField(this, "handleType", "file");
     __publicField(this, "_compositFsFileDescriptor", -1);
     this.delegate = args.fs;
     this._subFsFileDescriptor = args.subFsFileDescriptor;
-    this._parentFsFileDescriptors = args.parentFsFileDescriptors;
     this._compositFsFileDescriptor = -1;
     let typeNumber = args.fs.fileType();
     const fd = this._subFsFileDescriptor;
@@ -33904,6 +33896,7 @@ var _CompositeFs = class _CompositeFs {
     storageFs,
     gitRoot
   }) {
+    __publicField(this, "promises");
     __publicField(this, "gitRoot");
     __publicField(this, "ephemeralFilesFileSystem");
     __publicField(this, "hiddenFilesFileSystem");
@@ -33913,7 +33906,10 @@ var _CompositeFs = class _CompositeFs {
     __publicField(this, "name");
     __publicField(this, "pathToFileDescriptors", /* @__PURE__ */ new Map());
     __publicField(this, "openFileHandles", /* @__PURE__ */ new Map());
-    __publicField(this, "promises", {
+    this.name = name;
+    this.parentFs = parentFs;
+    this.gitRoot = gitRoot;
+    this.promises = {
       access: this.access.bind(this),
       opendir: this.opendir.bind(this),
       mkdir: this.mkdir.bind(this),
@@ -33930,10 +33926,7 @@ var _CompositeFs = class _CompositeFs {
       readFile: this.readFile.bind(this),
       writeFile: this.writeFile.bind(this),
       getFilehandle: this.getFilehandle.bind(this)
-    });
-    this.name = name;
-    this.parentFs = parentFs;
-    this.gitRoot = gitRoot;
+    };
     if (!parentFs && storageFs) {
       this.passThroughFileSystem = new PassThroughToAsyncFsSubFs({
         passThroughFs: storageFs,
@@ -33968,15 +33961,10 @@ var _CompositeFs = class _CompositeFs {
     this.subFilesystems.push(subFs);
   }
   /**
-   * TODO this might be a leftover from nf3 - check useage
-   * @param path
+   * helper function that takes a filePath and returns the fs that is responsible Sub filesystem for it
+   * @param filePath
+   * @returns
    */
-  async lookup(path6) {
-    throw new Error("lookup - not implemented");
-  }
-  async resolvePath(fd) {
-    throw new Error("resolvePath - not implemented");
-  }
   async getResponsibleFs(filePath) {
     if (!filePath.toString().startsWith(this.gitRoot) && // TODO fix path for browserfs
     this.gitRoot !== "./") {
@@ -34030,9 +34018,9 @@ var _CompositeFs = class _CompositeFs {
    * @returns
    */
   async readdir(dirPath, options) {
-    const fsToUse = await this.getResponsibleFs(dirPath);
-    if (fsToUse !== this.passThroughFileSystem) {
-      return fsToUse.readdir(dirPath, options);
+    const responsibleFs = await this.getResponsibleFs(dirPath);
+    if (responsibleFs !== this.passThroughFileSystem) {
+      return responsibleFs.readdir(dirPath, options);
     }
     const fileNames = /* @__PURE__ */ new Set();
     for (const fileSystem of [...this.subFilesystems].reverse()) {
@@ -34076,8 +34064,8 @@ var _CompositeFs = class _CompositeFs {
     return Array.from(fileNames);
   }
   async open(filePath, flags, mode) {
-    const fsToUse = await this.getResponsibleFs(filePath);
-    const fileHandle = await fsToUse.open(filePath, flags, mode);
+    const responsibleFs = await this.getResponsibleFs(filePath);
+    const fileHandle = await responsibleFs.open(filePath, flags, mode);
     const nextDescriptor = this.getNextFileDescriptor();
     fileHandle.realize(nextDescriptor);
     this.openFileHandles.set(nextDescriptor, fileHandle);
@@ -37262,7 +37250,32 @@ __publicField(_GitSubFs, "pathRouter", new LegitPathRouter({
 var GitSubFs = _GitSubFs;
 
 // src/legitfs.ts
-function createLegitFs(storageFs, gitRoot) {
+var import_isomorphic_git14 = __toESM(require_isomorphic_git(), 1);
+async function initLegitFs(storageFs, gitRoot) {
+  let gitFolderExisted = false;
+  try {
+    await storageFs.promises.readdir(gitRoot + "/.git");
+    gitFolderExisted = true;
+  } catch (e) {
+  }
+  if (gitFolderExisted) {
+    throw new Error(
+      `cant use initLegitFs on a folder with a git repo (${gitRoot}), use openLegitFs instead`
+    );
+  }
+  await import_isomorphic_git14.default.init({ fs: storageFs, dir: "/", defaultBranch: "main" });
+  await storageFs.promises.writeFile(gitRoot + "/.keep", "");
+  await import_isomorphic_git14.default.add({ fs: storageFs, dir: "/", filepath: ".keep" });
+  await import_isomorphic_git14.default.commit({
+    fs: storageFs,
+    dir: "/",
+    message: "Initial commit",
+    author: { name: "Test", email: "test@example.com" }
+  });
+  return openLegitFs(storageFs, gitRoot);
+}
+__name(initLegitFs, "initLegitFs");
+function openLegitFs(storageFs, gitRoot) {
   const rootFs = new CompositeFs({
     name: "root",
     // the root CompositeFs has no parent - it doesn't propagate up
@@ -37327,10 +37340,10 @@ function createLegitFs(storageFs, gitRoot) {
   userSpaceFs.setEphemeralFilesSubFs(gitFsEphemeralFs);
   return userSpaceFs;
 }
-__name(createLegitFs, "createLegitFs");
+__name(openLegitFs, "openLegitFs");
 
 // src/sync/createGitSyncService.ts
-var import_isomorphic_git14 = __toESM(require_isomorphic_git(), 1);
+var import_isomorphic_git15 = __toESM(require_isomorphic_git(), 1);
 
 // ../../node_modules/.pnpm/isomorphic-git@1.34.0/node_modules/isomorphic-git/http/node/index.js
 var import_simple_get = __toESM(require_simple_get(), 1);
@@ -37521,7 +37534,7 @@ var createGitSyncService = /* @__PURE__ */ __name(({
   let lastPushedCommit = void 0;
   let remoteUrl = void 0;
   async function pull() {
-    let result = await import_isomorphic_git14.default.fetch({
+    let result = await import_isomorphic_git15.default.fetch({
       fs,
       http: node_default,
       dir: gitRepoPath,
@@ -37536,14 +37549,14 @@ var createGitSyncService = /* @__PURE__ */ __name(({
       }), "onAuth")
     });
     const remote = "origin";
-    const localRefs = await import_isomorphic_git14.default.listBranches({ fs, dir: gitRepoPath });
+    const localRefs = await import_isomorphic_git15.default.listBranches({ fs, dir: gitRepoPath });
     let unpushedRefs = [];
     for (const localRef of localRefs) {
       const remoteRef = `${remote}/${localRef}`;
       let localCommit;
       let remoteCommit;
       try {
-        localCommit = await import_isomorphic_git14.default.resolveRef({
+        localCommit = await import_isomorphic_git15.default.resolveRef({
           fs,
           dir: gitRepoPath,
           ref: localRef
@@ -37552,7 +37565,7 @@ var createGitSyncService = /* @__PURE__ */ __name(({
         console.log(`Could not resolve local ref ${localRef}:`, e);
       }
       try {
-        remoteCommit = await import_isomorphic_git14.default.resolveRef({
+        remoteCommit = await import_isomorphic_git15.default.resolveRef({
           fs,
           dir: gitRepoPath,
           ref: remoteRef
@@ -37563,13 +37576,13 @@ var createGitSyncService = /* @__PURE__ */ __name(({
       if (localCommit && remoteCommit) {
         if (localCommit === remoteCommit) {
         } else {
-          const mergeBase = await import_isomorphic_git14.default.findMergeBase({
+          const mergeBase = await import_isomorphic_git15.default.findMergeBase({
             fs,
             dir: gitRepoPath,
             oids: [localCommit, remoteCommit]
           });
           if (mergeBase[0] !== localCommit && mergeBase[0] !== remoteCommit) {
-            const mergeResult = await import_isomorphic_git14.default.merge({
+            const mergeResult = await import_isomorphic_git15.default.merge({
               fs,
               dir: gitRepoPath,
               ours: localCommit,
@@ -37591,7 +37604,7 @@ var createGitSyncService = /* @__PURE__ */ __name(({
                 };
               }, "mergeDriver")
             });
-            await import_isomorphic_git14.default.writeRef({
+            await import_isomorphic_git15.default.writeRef({
               fs,
               dir: gitRepoPath,
               ref: `refs/heads/${localRef}`,
@@ -37603,7 +37616,7 @@ var createGitSyncService = /* @__PURE__ */ __name(({
             console.log(
               `branch ${localRef} differs - remote ahaed, not behind`
             );
-            await import_isomorphic_git14.default.writeRef({
+            await import_isomorphic_git15.default.writeRef({
               fs,
               dir: gitRepoPath,
               ref: `refs/heads/${localRef}`,
@@ -37630,7 +37643,7 @@ var createGitSyncService = /* @__PURE__ */ __name(({
   __name(pull, "pull");
   async function push(branchesToPush) {
     for (const branch of branchesToPush) {
-      await import_isomorphic_git14.default.push({
+      await import_isomorphic_git15.default.push({
         fs,
         http: node_default,
         dir: gitRepoPath,
@@ -37646,7 +37659,7 @@ var createGitSyncService = /* @__PURE__ */ __name(({
   }
   __name(push, "push");
   async function monitorChanges() {
-    let value = await import_isomorphic_git14.default.getConfig({
+    let value = await import_isomorphic_git15.default.getConfig({
       fs,
       dir: gitRepoPath,
       path: "remote.origin.url"
@@ -37674,7 +37687,7 @@ var createGitSyncService = /* @__PURE__ */ __name(({
   __name(stopPolling, "stopPolling");
   return {
     clone: /* @__PURE__ */ __name(async (url) => {
-      return import_isomorphic_git14.default.clone({
+      return import_isomorphic_git15.default.clone({
         fs,
         http: node_default,
         corsProxy,
@@ -37806,9 +37819,10 @@ export {
   HiddenFileSubFs,
   PassThroughSubFs,
   createGitSyncService,
-  createLegitFs,
   getLegitFsAccess,
-  gitBranchOperationsVirtualFile
+  gitBranchOperationsVirtualFile,
+  initLegitFs,
+  openLegitFs
 };
 /*! Bundled license information:
 
