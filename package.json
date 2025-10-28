@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@legit-sdk/core": "^0.1.3",
     "diff-match-patch-ts": "^0.6.0",
     "isomorphic-git": "^1.34.0",
     "memfs": "^4.49.0",

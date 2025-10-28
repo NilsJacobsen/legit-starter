@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import fs from "memfs";
-import { initLegitFs } from "../legit-sdk";
+import { initLegitFs, HistoryItem } from "@legit-sdk/core";
 import { DiffMatchPatch } from "diff-match-patch-ts";
 import Image from "next/image";
 import { format } from "timeago.js";
@@ -10,9 +10,6 @@ import Link from "next/link";
 
 const INITIAL_TEXT = "This is a document that you can edit! 🖋️";
 const FILE_NAME = "document.txt";
-
-type User = { name: string; email: string; timestamp: number };
-type HistoryItem = { oid: string; message: string; parent: string[]; author: User };
 
 export default function Home() {
   const dmp = new DiffMatchPatch();
@@ -56,7 +53,7 @@ export default function Home() {
     const initFs = async () => {
       try {
         if (!legitFs) {
-          const _legitFs = await initLegitFs(fs, "/");
+          const _legitFs = await initLegitFs(fs as unknown as typeof import("node:fs"), "/");
           await _legitFs.promises.writeFile(`/.legit/branches/main/${FILE_NAME}`, INITIAL_TEXT);
           setLegitFs(_legitFs);
         }
@@ -104,6 +101,7 @@ export default function Home() {
         if (!raw) return;
 
         const parsed: HistoryItem[] = JSON.parse(raw);
+        console.log(parsed)
         const enriched = await Promise.all(
           parsed.map(async (h) => {
             const newContent = await getCommitContent(h.oid)
