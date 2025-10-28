@@ -15369,7 +15369,7 @@ var require_which_typed_array = __commonJS({
       forEach(
         /** @type {Record<`\$${import('.').TypedArrayName}`, Getter>} */
         cache,
-        /** @type {(getter: Getter, name: `\$${import('.').TypedArrayName}`) => void} */
+        /** @type {(getter: Getter, name: `\$${import('./sdk').TypedArrayName}`) => void} */
         function(getter, typedArray) {
           if (!found) {
             try {
@@ -15389,7 +15389,7 @@ var require_which_typed_array = __commonJS({
       forEach(
         /** @type {Record<`\$${import('.').TypedArrayName}`, Getter>} */
         cache,
-        /** @type {(getter: Getter, name: `\$${import('.').TypedArrayName}`) => void} */
+        /** @type {(getter: Getter, name: `\$${import('./sdk').TypedArrayName}`) => void} */
         function(getter, name) {
           if (!found) {
             try {

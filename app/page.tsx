@@ -22,19 +22,6 @@ export default function Home() {
   const [checkoutOid, setCheckoutOid] = useState<string | null>(null);
   const headRef = useRef<string | null>(null);
 
-  // Initialize in-memory repo & and put a document.txt in it
-  useEffect(() => {
-    const initFs = async () => {
-      // make sure it only runs once
-      if(legitFs) return 
-      const _legitFs = await initLegitFs(fs, "/");
-      // setup first file
-      await _legitFs.promises.writeFile(`/.legit/branches/main/${FILE_NAME}`, INITIAL_TEXT);
-      setLegitFs(_legitFs);
-    };
-    initFs();
-  }, []);
-
   // Get file content from a commit
   const getCommitContent = async (oid: string | null) => {
     if (!oid || !legitFs) return "";
@@ -44,44 +31,6 @@ export default function Home() {
       return ""
     }
   };
-
-  // Poll for head changes and update history only when it changes
-  useEffect(() => {
-    if (!legitFs) return;
-
-    const poll = setInterval(async () => {
-      const newHead = await legitFs.promises.readFile("/.legit/branches/main/.legit/head", "utf8") as string;
-
-      if (newHead && newHead !== headRef.current) {
-        headRef.current = newHead;
-
-        // refresh history only when HEAD changes
-        const raw = await legitFs.promises.readFile("/.legit/branches/main/.legit/history", "utf8") as string;
-        if (!raw) return;
-
-        const parsed: HistoryItem[] = JSON.parse(raw);
-        const enriched = await Promise.all(
-          parsed.map(async (h) => {
-            const newContent = await getCommitContent(h.oid);
-            const parentOid = h.parent[0] || null;
-            const oldContent = await getCommitContent(parentOid);
-            return { ...h, oldContent, newContent };
-          })
-        );
-
-        setHistory(enriched);
-
-        // Update editor if we’re on HEAD
-        if (!checkoutOid || checkoutOid === newHead) {
-          setCheckoutOid(newHead);
-          const latest = enriched.find((h) => h.oid === newHead);
-          if (latest) setText(latest.newContent);
-        }
-      }
-    }, 100);
-
-    return () => clearInterval(poll);
-  }, [legitFs, checkoutOid]);
 
   // Checkout a commit
   const checkoutCommit = async (oid: string) => {
@@ -101,6 +50,80 @@ export default function Home() {
     ) as string;
     setCheckoutOid(newHead);
   };
+
+  // Initialize in-memory repo & and put a document.txt in it
+  useEffect(() => {
+    const initFs = async () => {
+      try {
+        if (!legitFs) {
+          const _legitFs = await initLegitFs(fs, "/");
+          await _legitFs.promises.writeFile(`/.legit/branches/main/${FILE_NAME}`, INITIAL_TEXT);
+          setLegitFs(_legitFs);
+        }
+      } catch (err) {
+        console.error("Failed to initialize LegitFS:", err);
+      }
+    };
+    initFs();
+  }, []);
+
+  // Poll for HEAD changes only
+  useEffect(() => {
+    if (!legitFs) return;
+
+    const pollHead = setInterval(async () => {
+      try {
+        const newHead = await legitFs.promises.readFile(
+          "/.legit/branches/main/.legit/head",
+          "utf8"
+        ) as string;
+
+        if (newHead && newHead !== headRef.current) {
+          headRef.current = newHead;
+          setCheckoutOid(newHead);
+        }
+      } catch (e) {
+        console.error("Polling the head failed: ", e)
+      }
+      // polling with 50ms is fine because reading the head is really cheap
+    }, 50);
+
+    return () => clearInterval(pollHead);
+  }, [legitFs]);
+
+  // Fetch and enrich history when HEAD changes
+  useEffect(() => {
+    if (!legitFs || !checkoutOid) return;
+
+    const updateHistory = async () => {
+      try {
+        const raw = await legitFs.promises.readFile(
+          "/.legit/branches/main/.legit/history",
+          "utf8"
+        ) as string;
+        if (!raw) return;
+
+        const parsed: HistoryItem[] = JSON.parse(raw);
+        const enriched = await Promise.all(
+          parsed.map(async (h) => {
+            const newContent = await getCommitContent(h.oid)
+            const oldContent = await getCommitContent(h.parent[0])
+            return { ...h, oldContent, newContent };
+          })
+        );
+
+        setHistory(enriched);
+
+        // Update editor if we're on HEAD
+        const latest = enriched.find((h) => h.oid === checkoutOid);
+        if (latest) setText(latest.newContent);
+      } catch (e) {
+        console.error("Not able to update history state: ", e)
+      }
+    };
+
+    updateHistory();
+  }, [legitFs, checkoutOid]);
 
   // Render diff helper
   const renderDiff = (oldStr: string, newStr: string) => {
@@ -164,7 +187,8 @@ export default function Home() {
             <div className="flex gap-3 items-center">
               <Image alt="Avatar" src="/avatar.svg" width={32} height={32} />
               <p className="text-md font-semibold flex-1">{h.message}</p>
-              {format(h.author.timestamp * 1000)}
+              {h.oid === history[0]?.oid && <p className="px-1.5 py-1 bg-zinc-200 text-sm rounded text-zinc-600" >latest</p>}
+              <p className="text-sm">{format(h.author.timestamp * 1000)}</p>
             </div>
             <div className="mt-2">{renderDiff(h.oldContent, h.newContent)}</div>
           </div>
