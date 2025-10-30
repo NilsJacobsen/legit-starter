@@ -83,7 +83,7 @@ export default function Home() {
         console.error("Polling the head failed: ", e)
       }
       // polling with 50ms is fine because reading the head is really cheap
-    }, 50);
+    }, 200);
 
     return () => clearInterval(pollHead);
   }, [legitFs]);
